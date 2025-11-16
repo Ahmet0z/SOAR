@@ -37,6 +37,27 @@ class ApiClient {
     this.requestTimeout = timeoutMs
   }
 
+  buildWebSocketUrl(path) {
+    if (typeof window === 'undefined') {
+      throw new Error('WebSocket bağlantıları yalnızca tarayıcıda kullanılabilir')
+    }
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`
+    const base = new URL(this.baseUrl, window.location.origin)
+    const wsProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
+    const trimmedPath = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname
+    let url = `${wsProtocol}//${base.host}${trimmedPath}${normalizedPath}`
+    if (this.token) {
+      const connector = url.includes('?') ? '&' : '?'
+      url = `${url}${connector}token=${encodeURIComponent(this.token)}`
+    }
+    return url
+  }
+
+  openAutomationEventsSocket() {
+    const url = this.buildWebSocketUrl('/ws/automation-events')
+    return new WebSocket(url)
+  }
+
   async request(path, options = {}) {
     const { responseType = 'json', timeout, ...fetchOptions } = options
     const controller = new AbortController()

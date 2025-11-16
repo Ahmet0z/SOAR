@@ -16,10 +16,17 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Başlangıçta SQLite veritabanı (`soar.db`) otomatik oluşturulur ve `admin / admin123` kimlik bilgilerine sahip varsayılan bir kullanıcı eklenir. API'ye erişirken OAuth2 password flow üzerinden alınan JWT kullanılır (`/api/auth/token`). `.env` dosyası üzerinden aşağıdaki ayarları özelleştirebilirsiniz:
+Veritabanı şeması Alembic üzerinden yönetilir; ilk kurulumda `alembic upgrade head` ile tüm tablolar oluşturulur. Otomasyon kuyruğu Redis üzerinde tutulduğundan lokalde örneğin `docker run -p 6379:6379 redis:7` komutu ile bir Redis örneği çalıştırmanız ve ayrı bir terminalde `python -m app.rq_worker` ile RQ worker'ı başlatmanız gerekir. Başlangıçta SQLite veritabanı (`soar.db`) oluşturulur ve `admin / admin123` kimlik bilgilerine sahip varsayılan bir kullanıcı eklenir. API'ye erişirken OAuth2 password flow üzerinden alınan JWT kullanılır (`/api/auth/token`). `.env` dosyası üzerinden aşağıdaki ayarları özelleştirebilirsiniz:
+
+```bash
+# Ayrı terminalde worker'ı başlatın
+cd backend
+python -m app.rq_worker
+```
 
 | Anahtar | Açıklama |
 | --- | --- |
@@ -29,6 +36,8 @@ Başlangıçta SQLite veritabanı (`soar.db`) otomatik oluşturulur ve `admin / 
 | `SOAR_DEFAULT_TENANT`, `SOAR_DEFAULT_TENANT_NAME` | İlk organizasyon bilgileri |
 | `SOAR_DEFAULT_ADMIN_USERNAME`, `SOAR_DEFAULT_ADMIN_PASSWORD` | Başlangıç yönetici kullanıcı bilgileri |
 | `SOAR_INVITE_EXPIRY_HOURS` | Organizasyon davetlerinin geçerli olacağı süre |
+| `SOAR_REDIS_URL` | Otomasyon kuyruğu ve gerçek zamanlı yayınlar için Redis adresi |
+| `SOAR_AUTOMATION_QUEUE` | RQ kuyruğunun adı (varsayılan `automation-runs`) |
 
 ### Öne Çıkan Backend Modülleri
 
@@ -55,10 +64,10 @@ Arayüz `http://localhost:5173` adresinde çalışır ve varsayılan olarak `htt
 - **Giriş & RBAC** – Admin kullanıcı bilgileri ile giriş yapılır, JWT localStorage'da saklanır ve yetkisiz yanıtlar otomatik olarak oturumu sonlandırır.
 - **React Query veri katmanı** – Tüm CRUD işlemleri merkezi önbellekten yönetilir ve optimistic güncellemeler yapılır.
 - **Context düzenleyicileri** – Incidents ve indicators modüllerinde şema tabanlı modal ile context alanı ekleme/silme yapılır, şema yöneticisinden alan geçmişi (versiyon/tarih) görüntülenebilir.
-- **Automation kod editörü** – Automations panelinde CodeMirror + Python dili ile sözdizimi vurgulu editör ve JSON tabanlı test kuyruğu bulunur; her çalışma kuyruğa alınır, durum/çıktı geçmişi listelenir, başarısız koşular yeniden kuyruğa alınabilir.
+- **Automation kod editörü** – Automations panelinde CodeMirror + Python dili ile sözdizimi vurgulu editör ve JSON tabanlı test kuyruğu bulunur; her çalışma Redis destekli kuyruğa alınır, durum/çıktı geçmişi gerçek zamanlı WebSocket akışıyla güncellenir, başarısız koşular yeniden kuyruğa alınabilir.
 - **Playbook tasarımcısı** – React Flow ile sürükle-bırak düğüm/ok oluşturma, otomasyon eşleme, edge koşulu düzenleme ve doğrulama/çalıştırma çıktısı görüntüleme.
 - **Audit & Organization panelleri** – Denetim kayıtları gerçek zamanlı listelenir, aksiyon/varlık/tarih filtreleriyle aratılabilir ve CSV olarak indirilebilir. Organizasyon ekranında üyelikler, davet token son kullanma tarihleri ve kabul zamanları görüntülenir, davet linkleri self-servis kabul ekranıyla paylaşılabilir.
-- **Automation analitikleri ve worker sağlığı** – Son koşumlar için zaman serisi grafiği, ortalama metrikler, timeout sayıları ve worker kuyruğunun güncel durumu tek kartta görüntülenir.
+- **Automation analitikleri ve worker sağlığı** – Son koşumlar için zaman serisi grafiği, ortalama metrikler, timeout sayıları ve worker kuyruğunun güncel durumu tek kartta görüntülenir; RQ kuyruğu/worker telemetrisi WebSocket olaylarıyla panelde eşzamanlı güncellenir.
 
 ## Test
 

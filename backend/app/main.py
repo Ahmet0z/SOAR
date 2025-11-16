@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import csv
 import json
+import asyncio
 from datetime import datetime, timedelta
 from io import StringIO
 from typing import List
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session, select
 
 from .auth import (
@@ -17,6 +28,7 @@ from .auth import (
     create_access_token,
     get_current_user,
     get_password_hash,
+    resolve_user_from_token,
     seed_default_user,
     verify_password,
 )
@@ -66,6 +78,7 @@ from .services import (
     validate_context_mutation,
     validate_playbook,
 )
+from .realtime import publish_tenant_event, register_event_loop, stream_tenant_events
 
 settings = get_settings()
 
@@ -173,8 +186,13 @@ def _get_organization_by_slug(session: Session, slug: str) -> Organization | Non
     return session.exec(statement).first()
 
 
+def _emit_run_snapshot(run: AutomationRun) -> None:
+    publish_tenant_event(run.tenant_id, "run_update", {"run": jsonable_encoder(run)})
+
+
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
+    register_event_loop(asyncio.get_running_loop())
     init_db()
     start_runner()
     with Session(engine) as session:
@@ -184,6 +202,27 @@ def on_startup() -> None:
 @app.get("/api/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.websocket("/api/ws/automation-events")
+async def automation_events_websocket(websocket: WebSocket) -> None:
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    with Session(engine) as session:
+        try:
+            user = resolve_user_from_token(token, session)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        tenant_id = user.tenant_id
+    await websocket.accept()
+    try:
+        async for event in stream_tenant_events(tenant_id):
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        return
 
 
 @app.post("/api/auth/token", response_model=Token)
@@ -1044,7 +1083,8 @@ def queue_automation_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    enqueue_run(run.id)
+    _emit_run_snapshot(run)
+    enqueue_run(run.id, user.tenant_id)
     record_audit_log(
         session,
         tenant_id=user.tenant_id,
@@ -1151,7 +1191,8 @@ def requeue_automation_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    enqueue_run(run.id)
+    _emit_run_snapshot(run)
+    enqueue_run(run.id, user.tenant_id)
     record_audit_log(
         session,
         tenant_id=user.tenant_id,

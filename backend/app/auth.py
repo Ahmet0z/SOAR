@@ -46,9 +46,7 @@ def authenticate_user(session: Session, username: str, password: str) -> Optiona
     return user
 
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)
-) -> User:
+def resolve_user_from_token(token: str, session: Session) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -68,6 +66,12 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)
+) -> User:
+    return resolve_user_from_token(token, session)
 
 
 def seed_default_user(session: Session) -> None:

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     default_admin_username: str = Field("admin", env="SOAR_DEFAULT_ADMIN_USERNAME")
     default_admin_password: str = Field("admin123", env="SOAR_DEFAULT_ADMIN_PASSWORD")
     invite_expiry_hours: int = Field(168, env="SOAR_INVITE_EXPIRY_HOURS")
+    redis_url: str = Field("redis://localhost:6379/0", env="SOAR_REDIS_URL")
+    automation_queue_name: str = Field("automation-runs", env="SOAR_AUTOMATION_QUEUE")
 
     class Config:
         env_file = ".env"

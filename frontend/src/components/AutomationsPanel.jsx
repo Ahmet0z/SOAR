@@ -20,6 +20,9 @@ function AutomationsPanel() {
   const [activeRunId, setActiveRunId] = useState(null)
   const [metricsWindow, setMetricsWindow] = useState('24')
   const [metricsAutomationFilter, setMetricsAutomationFilter] = useState('all')
+  const [liveRunnerStatus, setLiveRunnerStatus] = useState(null)
+  const [eventStreamError, setEventStreamError] = useState('')
+  const [eventConnected, setEventConnected] = useState(false)
 
   const automationsQuery = useQuery({
     queryKey: ['automations'],
@@ -35,12 +38,7 @@ function AutomationsPanel() {
   const runDetailsQuery = useQuery({
     queryKey: ['automation-run', activeRunId],
     queryFn: () => apiClient.getAutomationRun(activeRunId),
-    enabled: Boolean(activeRunId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      if (!activeRunId || !status) return false
-      return ['success', 'failed'].includes(status) ? false : 1500
-    }
+    enabled: Boolean(activeRunId)
   })
 
   const metricsQuery = useQuery({
@@ -50,16 +48,82 @@ function AutomationsPanel() {
         window_hours: Number(metricsWindow),
         automation_id: metricsAutomationFilter !== 'all' ? metricsAutomationFilter : undefined
       }),
-    keepPreviousData: true,
-    refetchInterval: 10000
+    keepPreviousData: true
   })
 
   const runnerStatusQuery = useQuery({
     queryKey: ['automation-runner-status'],
     queryFn: () => apiClient.getAutomationRunnerStatus(),
-    refetchInterval: 5000,
     retry: false
   })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    if (!apiClient.token) return undefined
+    let socket
+    let reconnectTimer
+    let active = true
+
+    const handleRunUpdate = (run) => {
+      if (!run || !run.id) return
+      queryClient.setQueryData(['automation-run', run.id], run)
+      queryClient.setQueryData(['automation-runs', run.automation_id], (existing = []) => {
+        const filtered = existing.filter((item) => item.id !== run.id)
+        const updated = [run, ...filtered]
+        return updated.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+      })
+    }
+
+    const handleMessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (!data?.type) return
+        if (data.type === 'run_update') {
+          handleRunUpdate(data.payload?.run)
+        } else if (data.type === 'runner_status') {
+          setLiveRunnerStatus(data.payload)
+          queryClient.setQueryData(['automation-runner-status'], data.payload)
+        } else if (data.type === 'metrics_refresh') {
+          queryClient.invalidateQueries({ queryKey: ['automation-run-metrics'] })
+        }
+      } catch (err) {
+        // ignore malformed events
+      }
+    }
+
+    const connect = () => {
+      socket = apiClient.openAutomationEventsSocket()
+      socket.onopen = () => {
+        if (!active) return
+        setEventConnected(true)
+        setEventStreamError('')
+      }
+      socket.onmessage = handleMessage
+      socket.onerror = () => {
+        setEventStreamError('Gerçek zamanlı bağlantı kesildi, tekrar bağlanılıyor...')
+      }
+      socket.onclose = () => {
+        setEventConnected(false)
+        if (active) {
+          reconnectTimer = window.setTimeout(connect, 3000)
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      active = false
+      if (socket) {
+        socket.close()
+      }
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer)
+      }
+    }
+  }, [queryClient, apiClient.token])
 
   const selectedAutomation = useMemo(
     () => automationsQuery.data?.find((item) => item.id === selectedId),
@@ -174,7 +238,7 @@ function AutomationsPanel() {
     const total = bucket.success + bucket.failed + bucket.running + bucket.pending
     return total > max ? total : max
   }, 1)
-  const workerStatus = runnerStatusQuery.data
+  const workerStatus = liveRunnerStatus ?? runnerStatusQuery.data
 
   return (
     <div className="panel-grid">
@@ -417,6 +481,10 @@ function AutomationsPanel() {
                 ? new Date(workerStatus.last_heartbeat).toLocaleTimeString('tr-TR')
                 : '—'}
             </p>
+            <p className={`stream-indicator ${eventConnected ? 'connected' : 'disconnected'}`}>
+              {eventConnected ? 'Gerçek zamanlı güncelleniyor' : 'Bağlantı yeniden kuruluyor...'}
+            </p>
+            {eventStreamError && <p className="error-text">{eventStreamError}</p>}
             <button type="button" className="ghost small" onClick={() => runnerStatusQuery.refetch()}>
               Yenile
             </button>

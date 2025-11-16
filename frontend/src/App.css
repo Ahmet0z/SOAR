@@ -283,6 +283,19 @@ main {
   font-size: 1.4rem;
 }
 
+.stream-indicator {
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+
+.stream-indicator.connected {
+  color: #22c55e;
+}
+
+.stream-indicator.disconnected {
+  color: #f97316;
+}
+
 .run-row {
   display: flex;
   align-items: center;

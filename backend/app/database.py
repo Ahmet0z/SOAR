@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterator
 
-from sqlmodel import Session, SQLModel, create_engine
+from alembic import command
+from alembic.config import Config
+from sqlmodel import Session, create_engine
 
 from .config import get_settings
 
@@ -14,7 +17,9 @@ engine = create_engine(
 
 
 def init_db() -> None:
-    SQLModel.metadata.create_all(engine)
+    alembic_cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(alembic_cfg, "head")
 
 
 def get_session() -> Iterator[Session]:
