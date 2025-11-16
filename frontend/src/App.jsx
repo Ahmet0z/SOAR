@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import IncidentsPanel from './components/IncidentsPanel'
 import IndicatorsPanel from './components/IndicatorsPanel'
 import AutomationsPanel from './components/AutomationsPanel'
+import AutomationAnalyticsPanel from './components/AutomationAnalyticsPanel'
 import PlaybooksPanel from './components/PlaybooksPanel'
 import LoginForm from './components/LoginForm'
 import InviteAcceptance from './components/InviteAcceptance'
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'incidents', label: 'Incidents', component: IncidentsPanel },
   { id: 'indicators', label: 'Indicators', component: IndicatorsPanel },
   { id: 'automations', label: 'Automations', component: AutomationsPanel },
+  { id: 'automation-analytics', label: 'Analytics', component: AutomationAnalyticsPanel },
   { id: 'playbooks', label: 'Playbooks', component: PlaybooksPanel },
   { id: 'audit-logs', label: 'Audit Logs', component: AuditLogsPanel },
   { id: 'organizations', label: 'Organizations', component: OrganizationsPanel }

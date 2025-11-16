@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Optional
+from threading import Lock
+from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from .models import (
     Automation,
     AutomationExecutionResult,
     AutomationRun,
+    AutomationRunAggregate,
+    AutomationRunAnalytics,
     AutomationRunBucket,
     AutomationRunMetrics,
     AutomationRunEvent,
@@ -27,6 +31,8 @@ from .models import (
 )
 
 from .database import engine
+from .config import get_settings
+from .notifications import dispatch_run_event_notification
 from .realtime import publish_tenant_event
 
 SUPPORTED_TYPES = {
@@ -34,6 +40,9 @@ SUPPORTED_TYPES = {
     "integer": int,
     "boolean": bool,
 }
+
+_retention_lock = Lock()
+_last_retention_cleanup: datetime | None = None
 
 
 def record_audit_log(
@@ -68,18 +77,50 @@ def record_run_event(
     message: str,
     payload: Dict[str, object] | None = None,
 ) -> AutomationRunEvent:
+    payload_data: Dict[str, Any] = dict(payload or {})
+    payload_data.setdefault("automation_id", run.automation_id)
     event = AutomationRunEvent(
         run_id=run.id,
         tenant_id=run.tenant_id,
         event_type=event_type,
         message=message,
-        payload=payload or {},
+        payload=payload_data,
     )
     session.add(event)
     session.commit()
     session.refresh(event)
     publish_tenant_event(run.tenant_id, "run_event", {"event": jsonable_encoder(event)})
+    dispatch_run_event_notification(run, event)
+    maybe_prune_run_events(session, tenant_id=run.tenant_id)
     return event
+
+
+def purge_run_events_before(
+    session: Session, *, tenant_id: str, cutoff: datetime
+) -> int:
+    statement = delete(AutomationRunEvent).where(
+        AutomationRunEvent.tenant_id == tenant_id,
+        AutomationRunEvent.created_at < cutoff,
+    )
+    result = session.exec(statement)
+    session.commit()
+    return int(result.rowcount or 0)
+
+
+def maybe_prune_run_events(session: Session, *, tenant_id: str) -> None:
+    settings = get_settings()
+    if settings.run_event_retention_days <= 0:
+        return
+    now = datetime.utcnow()
+    with _retention_lock:
+        global _last_retention_cleanup
+        if _last_retention_cleanup and now - _last_retention_cleanup < timedelta(
+            minutes=settings.run_event_prune_interval_minutes
+        ):
+            return
+        _last_retention_cleanup = now
+    cutoff = now - timedelta(days=settings.run_event_retention_days)
+    purge_run_events_before(session, tenant_id=tenant_id, cutoff=cutoff)
 
 
 def _cast_value(field_type: str, value):
@@ -334,4 +375,111 @@ def calculate_run_metrics(
         avg_duration_ms=avg_duration,
         avg_queue_latency_ms=avg_latency,
         per_hour=buckets,
+    )
+
+
+def summarize_run_analytics(
+    runs: Iterable[AutomationRun],
+    events: Iterable[AutomationRunEvent],
+    automations: Iterable[Automation],
+    *,
+    window_hours: int,
+    since: datetime,
+    until: datetime,
+    limit: int,
+) -> AutomationRunAnalytics:
+    automation_lookup = {automation.id: automation for automation in automations}
+    stats_map: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {
+            "run_count": 0,
+            "success_count": 0,
+            "failure_count": 0,
+            "timeout_count": 0,
+            "retry_count": 0,
+            "durations": [],
+            "retry_durations": [],
+            "last_run_at": None,
+        }
+    )
+    automation_name_hints: Dict[str, str] = {}
+    total_timeouts = 0
+    runs_list = list(runs)
+    for run in runs_list:
+        stats = stats_map[run.automation_id]
+        stats["run_count"] += 1
+        stats["last_run_at"] = (
+            run.created_at
+            if stats["last_run_at"] is None
+            else max(stats["last_run_at"], run.created_at)
+        )
+        if run.duration_ms is not None:
+            stats["durations"].append(run.duration_ms)
+        if run.status == "success":
+            stats["success_count"] += 1
+        elif run.status == "failed":
+            stats["failure_count"] += 1
+        elif run.status == "running":
+            # ignore
+            pass
+        else:
+            stats["failure_count"] += 0
+        if run.timed_out:
+            stats["timeout_count"] += 1
+            total_timeouts += 1
+
+    last_event_per_run: Dict[str, datetime] = {}
+    for event in sorted(events, key=lambda item: item.created_at):
+        automation_id = event.payload.get("automation_id")
+        if not automation_id:
+            continue
+        if event.payload.get("automation_name"):
+            automation_name_hints[automation_id] = event.payload["automation_name"]
+        stats = stats_map[automation_id]
+        if event.event_type == "retry_scheduled":
+            stats["retry_count"] += 1
+            previous = last_event_per_run.get(event.run_id)
+            if previous:
+                delta = int((event.created_at - previous).total_seconds() * 1000)
+                if delta >= 0:
+                    stats["retry_durations"].append(delta)
+        last_event_per_run[event.run_id] = event.created_at
+
+    aggregates: List[AutomationRunAggregate] = []
+    for automation_id, stats in stats_map.items():
+        automation = automation_lookup.get(automation_id)
+        automation_name = (
+            automation.name if automation else automation_name_hints.get(automation_id)
+        ) or automation_id
+        durations = stats["durations"]
+        retry_durations = stats["retry_durations"]
+        aggregates.append(
+            AutomationRunAggregate(
+                automation_id=automation_id,
+                automation_name=automation_name,
+                run_count=stats["run_count"],
+                success_count=stats["success_count"],
+                failure_count=stats["failure_count"],
+                timeout_count=stats["timeout_count"],
+                retry_count=stats["retry_count"],
+                avg_duration_ms=
+                    (sum(durations) / len(durations) if durations else None),
+                mean_time_between_retries_ms=
+                    (sum(retry_durations) / len(retry_durations)
+                     if retry_durations
+                     else None),
+                last_run_at=stats["last_run_at"],
+            )
+        )
+
+    aggregates.sort(key=lambda item: (item.failure_count, item.run_count), reverse=True)
+    trimmed = aggregates[:limit]
+
+    return AutomationRunAnalytics(
+        window_hours=window_hours,
+        from_ts=since,
+        to_ts=until,
+        total_runs=len(runs_list),
+        total_failures=sum(1 for run in runs_list if run.status == "failed"),
+        total_timeouts=total_timeouts,
+        automations=trimmed,
     )

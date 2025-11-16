@@ -38,6 +38,11 @@ python -m app.rq_worker
 | `SOAR_INVITE_EXPIRY_HOURS` | Organizasyon davetlerinin geçerli olacağı süre |
 | `SOAR_REDIS_URL` | Otomasyon kuyruğu ve gerçek zamanlı yayınlar için Redis adresi |
 | `SOAR_AUTOMATION_QUEUE` | RQ kuyruğunun adı (varsayılan `automation-runs`) |
+| `SOAR_RUN_EVENT_RETENTION_DAYS` | `AutomationRunEvent` kayıtlarının tutulacağı gün sayısı |
+| `SOAR_RUN_EVENT_PRUNE_INTERVAL_MINUTES` | Otomatik temizliklerin kontrol sıklığı |
+| `SOAR_SLACK_WEBHOOK_URL`, `SOAR_TEAMS_WEBHOOK_URL` | Opsiyonel outbound bildirim webhook adresleri |
+| `SOAR_SMTP_HOST`, `SOAR_SMTP_PORT`, `SOAR_SMTP_USERNAME`, `SOAR_SMTP_PASSWORD`, `SOAR_SMTP_FROM`, `SOAR_SMTP_USE_TLS` | E-posta bildirimleri için SMTP ayarları |
+| `SOAR_NOTIFICATION_EMAILS` | Virgülle ayrılmış e-posta alıcı listesi |
 
 ### Docker Compose ile hızlı başlangıç
 
@@ -56,6 +61,8 @@ Komut, backend klasörünü konteyner içine bağlar, API'yi `http://localhost:8
 - **Automations** – Python kodu tutulan otomasyon kayıtları ve güvenli yürütme kuyruğu (`/api/automations/{id}/runs`). Kodlar `run(payload)` fonksiyonu içermelidir, her çalışma `AutomationRun` tablosunda saklanır ve worker thread tarafından izole şekilde yürütülür.
 - **Automations** – Python kodu tutulan otomasyon kayıtları ve güvenli yürütme kuyruğu (`/api/automations/{id}/runs`). Kodlar `run(payload)` fonksiyonu içermelidir, her çalışma `AutomationRun` tablosunda saklanır, tekrar deneme/zaman aşımı politikaları ve bekleme/süre metrikleri otomatik tutulur.
 - **Automation run olayları** – Her çalışmanın kuyruğa alınmasından tamamlanmasına kadar tüm durum değişimleri `AutomationRunEvent` tablosunda saklanır ve `/api/automation-runs/{id}/events` ucu üzerinden veya gerçek zamanlı websocket yayınlarıyla görüntülenebilir.
+- **Bildirimler & saklama** – Run olayları otomatik olarak belirlenen süre sonunda temizlenir; kritik (başarı, hata, timeout) olayları Slack/Teams webhook’larına ve SMTP üzerinden e-posta listelerine gönderilir.
+- **Çapraz analitikler** – `/api/automation-runs/analytics` ucu, run ve event kayıtlarını toplayarak otomasyon başına başarısızlık, yeniden deneme ve ortalama süre metrikleri üretir.
 - **Playbooks** – Düğüm ve kenar tanımlarını JSON olarak saklayan modeller, graf doğrulama uçları ve otomasyonları sırayla çalıştıran yürütme motoru (`/api/playbooks/{id}/run`).
 - **Organizations & Audit Logs** – Çok kiracılı senaryolar için organizasyon uçları, kullanıcı üyelik/davet/switch operasyonları, davet token süre sonu ve public kabul uçları ile self-servis kayıt, her kritik aksiyonu saklayan ve filtrelenebilir/CSV dışa aktarılabilir audit log API'si.
 - **Automation telemetry** – Kuyruklanan otomasyonlar için latency/süre/timeout metrikleri, yeniden kuyruğa alma uçları ve worker heartbeat bilgisini dönen sağlık ucu.
@@ -80,6 +87,7 @@ Arayüz `http://localhost:5173` adresinde çalışır ve varsayılan olarak `htt
 - **Audit & Organization panelleri** – Denetim kayıtları gerçek zamanlı listelenir, aksiyon/varlık/tarih filtreleriyle aratılabilir ve CSV olarak indirilebilir. Organizasyon ekranında üyelikler, davet token son kullanma tarihleri ve kabul zamanları görüntülenir, davet linkleri self-servis kabul ekranıyla paylaşılabilir.
 - **Automation analitikleri ve worker sağlığı** – Son koşumlar için zaman serisi grafiği, ortalama metrikler, timeout sayıları ve worker kuyruğunun güncel durumu tek kartta görüntülenir; RQ kuyruğu/worker telemetrisi WebSocket olaylarıyla panelde eşzamanlı güncellenir.
 - **Otomasyon olay zaman çizelgesi ve bildirimler** – Seçilen çalışmanın ayrıntı panelinde gerçek zamanlı `AutomationRunEvent` akışı gösterilir, başarı/başarısızlık gibi kritik olaylar toast bildirimleriyle duyurulur.
+- **Automation Analytics sekmesi** – Yeni panel, `/automation-runs/analytics` verilerini kullanarak başarısızlık sıralaması, ortalama süre, zaman aşımı ve yeniden deneme aralıklarını tablo halinde gösterir; zaman aralığı ve kayıt limiti kullanıcı tarafından ayarlanabilir.
 
 ## Test
 

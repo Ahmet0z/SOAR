@@ -145,6 +145,7 @@ def process_run(run_id: str) -> bool:
         )
 
         automation = session.get(Automation, run.automation_id)
+        automation_name = automation.name if automation else run.automation_id
         if not automation:
             run.status = "failed"
             run.last_error = "Automation not found"
@@ -163,7 +164,7 @@ def process_run(run_id: str) -> bool:
                 run=run,
                 event_type="failed",
                 message="Otomasyon bulunamadı",
-                payload={"automation_id": run.automation_id},
+                payload={"automation_id": run.automation_id, "automation_name": automation_name},
             )
             return False
 
@@ -193,6 +194,7 @@ def process_run(run_id: str) -> bool:
                 payload={
                     "duration_ms": run.duration_ms,
                     "automation_id": run.automation_id,
+                    "automation_name": automation_name,
                 },
             )
             return False
@@ -210,6 +212,7 @@ def process_run(run_id: str) -> bool:
                 payload={
                     "timeout_seconds": run.timeout_seconds,
                     "automation_id": run.automation_id,
+                    "automation_name": automation_name,
                 },
             )
 
@@ -230,6 +233,7 @@ def process_run(run_id: str) -> bool:
                     "attempt": run.attempts,
                     "max_retries": run.max_retries,
                     "automation_id": run.automation_id,
+                    "automation_name": automation_name,
                 },
             )
             return True
@@ -245,7 +249,11 @@ def process_run(run_id: str) -> bool:
             run=run,
             event_type="failed",
             message=f"Çalışma başarısız oldu: {reason}",
-            payload={"error": reason, "automation_id": run.automation_id},
+            payload={
+                "error": reason,
+                "automation_id": run.automation_id,
+                "automation_name": automation_name,
+            },
         )
         return False
 

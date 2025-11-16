@@ -259,6 +259,10 @@ class ApiClient {
     return this.request(`/automation-runs/metrics${this.buildQuery(params)}`)
   }
 
+  getAutomationRunAnalytics(params = {}) {
+    return this.request(`/automation-runs/analytics${this.buildQuery(params)}`)
+  }
+
   getAutomationRunnerStatus() {
     return this.request('/automation-runner/status')
   }

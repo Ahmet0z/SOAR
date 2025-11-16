@@ -42,6 +42,7 @@ from .models import (
     AutomationExecutionRequest,
     AutomationRun,
     AutomationRunEvent,
+    AutomationRunAnalytics,
     AutomationRunMetrics,
     AutomationRunnerStatus,
     ContextMutation,
@@ -76,6 +77,7 @@ from .services import (
     record_audit_log,
     record_run_event,
     run_playbook,
+    summarize_run_analytics,
     validate_context,
     validate_context_mutation,
     validate_playbook,
@@ -1093,6 +1095,7 @@ def queue_automation_run(
         message="Çalışma kuyruğa alındı",
         payload={
             "automation_id": automation_id,
+            "automation_name": automation.name,
             "max_retries": run.max_retries,
             "timeout_seconds": run.timeout_seconds,
         },
@@ -1182,6 +1185,49 @@ def get_automation_run_metrics(
 
 
 @app.get(
+    "/api/automation-runs/analytics",
+    response_model=AutomationRunAnalytics,
+)
+def get_automation_run_analytics(
+    window_hours: int = Query(168, ge=1, le=720),
+    limit: int = Query(10, ge=1, le=50),
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> AutomationRunAnalytics:
+    now = datetime.utcnow()
+    since = now - timedelta(hours=window_hours)
+    runs_stmt = select(AutomationRun).where(
+        AutomationRun.tenant_id == user.tenant_id,
+        AutomationRun.created_at >= since,
+    )
+    runs = session.exec(runs_stmt).all()
+    events_stmt = select(AutomationRunEvent).where(
+        AutomationRunEvent.tenant_id == user.tenant_id,
+        AutomationRunEvent.created_at >= since,
+    )
+    events = session.exec(events_stmt).all()
+    automation_ids = {run.automation_id for run in runs}
+    if not automation_ids:
+        automations: List[Automation] = []
+    else:
+        automations = session.exec(
+            select(Automation).where(
+                Automation.tenant_id == user.tenant_id,
+                Automation.id.in_(automation_ids),
+            )
+        ).all()
+    return summarize_run_analytics(
+        runs,
+        events,
+        automations,
+        window_hours=window_hours,
+        since=since,
+        until=now,
+        limit=limit,
+    )
+
+
+@app.get(
     "/api/automation-runner/status",
     response_model=AutomationRunnerStatus,
 )
@@ -1222,12 +1268,14 @@ def requeue_automation_run(
     session.commit()
     session.refresh(run)
     _emit_run_snapshot(run)
+    automation = session.get(Automation, run.automation_id)
+    automation_name = automation.name if automation else run.automation_id
     record_run_event(
         session,
         run=run,
         event_type="manual_requeue",
         message="Yönetici tarafından yeniden kuyruğa alındı",
-        payload={"automation_id": run.automation_id},
+        payload={"automation_id": run.automation_id, "automation_name": automation_name},
     )
     enqueue_run(run.id, user.tenant_id)
     record_audit_log(

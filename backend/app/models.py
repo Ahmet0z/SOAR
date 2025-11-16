@@ -304,6 +304,29 @@ class AutomationRunMetrics(BaseModel):
     per_hour: List[AutomationRunBucket]
 
 
+class AutomationRunAggregate(BaseModel):
+    automation_id: str
+    automation_name: Optional[str]
+    run_count: int
+    success_count: int
+    failure_count: int
+    timeout_count: int
+    retry_count: int
+    avg_duration_ms: Optional[float]
+    mean_time_between_retries_ms: Optional[float]
+    last_run_at: Optional[datetime]
+
+
+class AutomationRunAnalytics(BaseModel):
+    window_hours: int
+    from_ts: datetime
+    to_ts: datetime
+    total_runs: int
+    total_failures: int
+    total_timeouts: int
+    automations: List[AutomationRunAggregate]
+
+
 class AutomationRunnerStatus(BaseModel):
     queue_size: int
     processed_runs: int
