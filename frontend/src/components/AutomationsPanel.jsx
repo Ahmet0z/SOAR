@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
@@ -23,6 +23,8 @@ function AutomationsPanel() {
   const [liveRunnerStatus, setLiveRunnerStatus] = useState(null)
   const [eventStreamError, setEventStreamError] = useState('')
   const [eventConnected, setEventConnected] = useState(false)
+  const [toasts, setToasts] = useState([])
+  const automationNamesRef = useRef({})
 
   const automationsQuery = useQuery({
     queryKey: ['automations'],
@@ -41,6 +43,12 @@ function AutomationsPanel() {
     enabled: Boolean(activeRunId)
   })
 
+  const runEventsQuery = useQuery({
+    queryKey: ['automation-run-events', activeRunId],
+    queryFn: () => apiClient.getAutomationRunEvents(activeRunId),
+    enabled: Boolean(activeRunId)
+  })
+
   const metricsQuery = useQuery({
     queryKey: ['automation-run-metrics', metricsWindow, metricsAutomationFilter],
     queryFn: () =>
@@ -56,6 +64,25 @@ function AutomationsPanel() {
     queryFn: () => apiClient.getAutomationRunnerStatus(),
     retry: false
   })
+
+  const automations = automationsQuery.data ?? []
+
+  useEffect(() => {
+    const mapping = {}
+    automations.forEach((automation) => {
+      mapping[automation.id] = automation.name
+    })
+    automationNamesRef.current = mapping
+  }, [automations])
+
+  const addToast = useCallback((message, variant = 'info') => {
+    if (typeof window === 'undefined') return
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setToasts((prev) => [...prev, { id, message, variant }])
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id))
+    }, 5000)
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -76,6 +103,35 @@ function AutomationsPanel() {
       })
     }
 
+    const handleRunEvent = (event) => {
+      if (!event || !event.id) return
+      queryClient.setQueryData(['automation-run-events', event.run_id], (existing = []) => {
+        const filtered = existing.filter((item) => item.id !== event.id)
+        const updated = [...filtered, event]
+        return updated.sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        )
+      })
+      const toastWorthy = ['success', 'failed', 'timeout']
+      if (toastWorthy.includes(event.event_type)) {
+        const automationId = event.payload?.automation_id
+        const automationName =
+          (automationId && automationNamesRef.current[automationId]) || 'Otomasyon'
+        const statusMessages = {
+          success: 'başarıyla tamamlandı',
+          failed: 'hata verdi',
+          timeout: 'zaman aşımına uğradı'
+        }
+        const variant =
+          event.event_type === 'success'
+            ? 'success'
+            : event.event_type === 'timeout'
+              ? 'warning'
+              : 'error'
+        addToast(`${automationName} çalışması ${statusMessages[event.event_type]}`, variant)
+      }
+    }
+
     const handleMessage = (event) => {
       try {
         const data = JSON.parse(event.data)
@@ -87,6 +143,8 @@ function AutomationsPanel() {
           queryClient.setQueryData(['automation-runner-status'], data.payload)
         } else if (data.type === 'metrics_refresh') {
           queryClient.invalidateQueries({ queryKey: ['automation-run-metrics'] })
+        } else if (data.type === 'run_event') {
+          handleRunEvent(data.payload?.event)
         }
       } catch (err) {
         // ignore malformed events
@@ -123,7 +181,7 @@ function AutomationsPanel() {
         window.clearTimeout(reconnectTimer)
       }
     }
-  }, [queryClient, apiClient.token])
+  }, [queryClient, apiClient.token, addToast])
 
   const selectedAutomation = useMemo(
     () => automationsQuery.data?.find((item) => item.id === selectedId),
@@ -223,7 +281,6 @@ function AutomationsPanel() {
     requeueMutation.mutate(runId)
   }
 
-  const automations = automationsQuery.data ?? []
   const automationFilterOptions = useMemo(
     () => [
       { value: 'all', label: 'Tüm Otomasyonlar' },
@@ -242,6 +299,15 @@ function AutomationsPanel() {
 
   return (
     <div className="panel-grid">
+      {toasts.length > 0 && (
+        <div className="toast-container">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast ${toast.variant}`}>
+              {toast.message}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="panel-column">
         <div className="panel-header">
           <h2>Otomasyonlar</h2>
@@ -345,6 +411,31 @@ function AutomationsPanel() {
                 <pre>{JSON.stringify(runDetailsQuery.data.logs, null, 2)}</pre>
                 {runDetailsQuery.data.output && (
                   <pre>{JSON.stringify(runDetailsQuery.data.output, null, 2)}</pre>
+                )}
+              </div>
+            )}
+            {activeRunId && (
+              <div className="run-events">
+                <h4>Çalışma Olayları</h4>
+                {runEventsQuery.isLoading && <p>Olay geçmişi yükleniyor...</p>}
+                {runEventsQuery.error && (
+                  <p className="error-text">{runEventsQuery.error.message}</p>
+                )}
+                {!runEventsQuery.isLoading && !runEventsQuery.error && (
+                  <ul>
+                    {(runEventsQuery.data ?? []).map((event) => (
+                      <li key={event.id}>
+                        <span className="event-time">
+                          {new Date(event.created_at).toLocaleTimeString('tr-TR')}
+                        </span>
+                        <div>
+                          <strong>{event.event_type}</strong>
+                          <p>{event.message}</p>
+                        </div>
+                      </li>
+                    ))}
+                    {!(runEventsQuery.data ?? []).length && <li>Henüz kayıt yok.</li>}
+                  </ul>
                 )}
               </div>
             )}

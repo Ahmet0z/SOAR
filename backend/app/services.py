@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session, select
 
 from .models import (
@@ -13,6 +14,7 @@ from .models import (
     AutomationRun,
     AutomationRunBucket,
     AutomationRunMetrics,
+    AutomationRunEvent,
     AuditLog,
     ContextSchemaDefinition,
     Incident,
@@ -25,6 +27,7 @@ from .models import (
 )
 
 from .database import engine
+from .realtime import publish_tenant_event
 
 SUPPORTED_TYPES = {
     "string": str,
@@ -55,6 +58,28 @@ def record_audit_log(
     session.commit()
     session.refresh(entry)
     return entry
+
+
+def record_run_event(
+    session: Session,
+    *,
+    run: AutomationRun,
+    event_type: str,
+    message: str,
+    payload: Dict[str, object] | None = None,
+) -> AutomationRunEvent:
+    event = AutomationRunEvent(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        event_type=event_type,
+        message=message,
+        payload=payload or {},
+    )
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    publish_tenant_event(run.tenant_id, "run_event", {"event": jsonable_encoder(event)})
+    return event
 
 
 def _cast_value(field_type: str, value):

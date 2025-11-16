@@ -41,6 +41,7 @@ from .models import (
     AutomationBase,
     AutomationExecutionRequest,
     AutomationRun,
+    AutomationRunEvent,
     AutomationRunMetrics,
     AutomationRunnerStatus,
     ContextMutation,
@@ -73,6 +74,7 @@ from .services import (
     calculate_run_metrics,
     execute_automation_code,
     record_audit_log,
+    record_run_event,
     run_playbook,
     validate_context,
     validate_context_mutation,
@@ -1084,6 +1086,17 @@ def queue_automation_run(
     session.commit()
     session.refresh(run)
     _emit_run_snapshot(run)
+    record_run_event(
+        session,
+        run=run,
+        event_type="queued",
+        message="Çalışma kuyruğa alındı",
+        payload={
+            "automation_id": automation_id,
+            "max_retries": run.max_retries,
+            "timeout_seconds": run.timeout_seconds,
+        },
+    )
     enqueue_run(run.id, user.tenant_id)
     record_audit_log(
         session,
@@ -1127,6 +1140,23 @@ def get_automation_run(
     if not run or run.tenant_id != user.tenant_id:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@app.get("/api/automation-runs/{run_id}/events", response_model=List[AutomationRunEvent])
+def get_automation_run_events(
+    run_id: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> List[AutomationRunEvent]:
+    run = session.get(AutomationRun, run_id)
+    if not run or run.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    statement = (
+        select(AutomationRunEvent)
+        .where(AutomationRunEvent.run_id == run_id)
+        .order_by(AutomationRunEvent.created_at.asc())
+    )
+    return session.exec(statement).all()
 
 
 @app.get(
@@ -1192,6 +1222,13 @@ def requeue_automation_run(
     session.commit()
     session.refresh(run)
     _emit_run_snapshot(run)
+    record_run_event(
+        session,
+        run=run,
+        event_type="manual_requeue",
+        message="Yönetici tarafından yeniden kuyruğa alındı",
+        payload={"automation_id": run.automation_id},
+    )
     enqueue_run(run.id, user.tenant_id)
     record_audit_log(
         session,

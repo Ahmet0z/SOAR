@@ -250,6 +250,16 @@ class AutomationRun(SQLModel, table=True):
     updated_at: datetime = SQLField(default_factory=datetime.utcnow)
 
 
+class AutomationRunEvent(SQLModel, table=True):
+    id: str = SQLField(default_factory=lambda: str(uuid4()), primary_key=True)
+    run_id: str = SQLField(foreign_key="automationrun.id", index=True)
+    tenant_id: str = SQLField(index=True)
+    event_type: str = SQLField(index=True)
+    message: str = SQLField()
+    payload: Dict[str, Any] = SQLField(sa_column=Column(JSON), default_factory=dict)
+    created_at: datetime = SQLField(default_factory=datetime.utcnow, index=True)
+
+
 class AuditLog(SQLModel, table=True):
     id: str = SQLField(default_factory=lambda: str(uuid4()), primary_key=True)
     tenant_id: str = SQLField(index=True)

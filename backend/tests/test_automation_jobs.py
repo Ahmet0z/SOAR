@@ -1,7 +1,7 @@
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.automation_runner import process_run, set_runner_engine
-from app.models import Automation, AutomationRun
+from app.models import Automation, AutomationRun, AutomationRunEvent
 
 
 def setup_module(_: object) -> None:
@@ -83,3 +83,17 @@ def test_process_run_marks_timeout_flag() -> None:
         session.refresh(run)
         assert run.status == "failed"
         assert run.timed_out is True
+
+
+def test_process_run_creates_events() -> None:
+    with Session(engine) as session:
+        automation = _create_automation(session, "def run(payload):\n    return {'value': 1}")
+        run = AutomationRun(automation_id=automation.id, tenant_id="t1", timeout_seconds=30)
+        session.add(run)
+        session.commit()
+        process_run(run.id)
+        events = session.exec(
+            select(AutomationRunEvent).where(AutomationRunEvent.run_id == run.id)
+        ).all()
+        assert any(event.event_type == "started" for event in events)
+        assert any(event.event_type in {"success", "failed"} for event in events)

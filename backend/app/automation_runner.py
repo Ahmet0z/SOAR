@@ -14,7 +14,7 @@ from .config import get_settings
 from .database import engine
 from .models import Automation, AutomationRun
 from .realtime import publish_tenant_event
-from .services import execute_automation_code
+from .services import execute_automation_code, record_run_event
 
 settings = get_settings()
 runner_engine = engine
@@ -136,6 +136,13 @@ def process_run(run_id: str) -> bool:
         session.add(run)
         session.commit()
         _emit_run_event(run)
+        record_run_event(
+            session,
+            run=run,
+            event_type="started",
+            message=f"Deneme {run.attempts} başlatıldı",
+            payload={"attempt": run.attempts, "automation_id": run.automation_id},
+        )
 
         automation = session.get(Automation, run.automation_id)
         if not automation:
@@ -151,6 +158,13 @@ def process_run(run_id: str) -> bool:
             _emit_run_event(run)
             _emit_metrics_hint(run)
             publish_runner_status(run.tenant_id)
+            record_run_event(
+                session,
+                run=run,
+                event_type="failed",
+                message="Otomasyon bulunamadı",
+                payload={"automation_id": run.automation_id},
+            )
             return False
 
         result = execute_automation_code(automation, run.input_payload)
@@ -171,6 +185,16 @@ def process_run(run_id: str) -> bool:
             _emit_run_event(run)
             _emit_metrics_hint(run)
             publish_runner_status(run.tenant_id)
+            record_run_event(
+                session,
+                run=run,
+                event_type="success",
+                message="Çalışma başarıyla tamamlandı",
+                payload={
+                    "duration_ms": run.duration_ms,
+                    "automation_id": run.automation_id,
+                },
+            )
             return False
 
         reason = "Timeout exceeded" if timed_out else (result.logs[-1] if result.logs else "Execution failed")
@@ -178,6 +202,16 @@ def process_run(run_id: str) -> bool:
         run.output = None
         if timed_out:
             run.logs = run.logs + [f"{run.timeout_seconds}sn zaman aşımı aşıldı"]
+            record_run_event(
+                session,
+                run=run,
+                event_type="timeout",
+                message=f"{run.timeout_seconds} saniyelik zaman aşımı aşıldı",
+                payload={
+                    "timeout_seconds": run.timeout_seconds,
+                    "automation_id": run.automation_id,
+                },
+            )
 
         if run.attempts <= run.max_retries:
             run.status = "retrying"
@@ -187,6 +221,17 @@ def process_run(run_id: str) -> bool:
             session.add(run)
             session.commit()
             _emit_run_event(run)
+            record_run_event(
+                session,
+                run=run,
+                event_type="retry_scheduled",
+                message="Çalışma tekrar denenecek",
+                payload={
+                    "attempt": run.attempts,
+                    "max_retries": run.max_retries,
+                    "automation_id": run.automation_id,
+                },
+            )
             return True
 
         run.status = "failed"
@@ -195,6 +240,13 @@ def process_run(run_id: str) -> bool:
         _emit_run_event(run)
         _emit_metrics_hint(run)
         publish_runner_status(run.tenant_id)
+        record_run_event(
+            session,
+            run=run,
+            event_type="failed",
+            message=f"Çalışma başarısız oldu: {reason}",
+            payload={"error": reason, "automation_id": run.automation_id},
+        )
         return False
 
 
