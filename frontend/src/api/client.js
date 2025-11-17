@@ -1,4 +1,12 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE_URL = (() => {
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
+  if (typeof window !== 'undefined') {
+    // Match the current origin by default to avoid mixed-content issues when the
+    // UI is served over HTTPS or behind a dev proxy.
+    return `${window.location.origin}/api`
+  }
+  return 'http://localhost:8000/api'
+})()
 
 class ApiClient {
   constructor(baseUrl = API_BASE_URL) {

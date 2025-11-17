@@ -9,7 +9,15 @@ class Settings(BaseSettings):
     algorithm: str = Field("HS256", env="SOAR_JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(60, env="SOAR_TOKEN_EXPIRE_MINUTES")
     database_url: str = Field("sqlite:///./soar.db", env="SOAR_DATABASE_URL")
-    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173"], env="SOAR_CORS_ORIGINS")
+    cors_origins: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        ],
+        env="SOAR_CORS_ORIGINS",
+    )
     default_tenant_slug: str = Field("default", env="SOAR_DEFAULT_TENANT")
     default_tenant_name: str = Field("Default Organization", env="SOAR_DEFAULT_TENANT_NAME")
     default_admin_username: str = Field("admin", env="SOAR_DEFAULT_ADMIN_USERNAME")
@@ -32,6 +40,17 @@ class Settings(BaseSettings):
     notification_emails: List[str] = Field(
         default_factory=list, env="SOAR_NOTIFICATION_EMAILS"
     )
+
+    @validator("cors_origins", pre=True)
+    def _split_origins(cls, value):  # type: ignore[no-untyped-def]
+        if isinstance(value, str):
+            # Support comma or space separated origin lists for easier .env usage.
+            separators = [",", " "]
+            for sep in separators:
+                if sep in value:
+                    return [item.strip() for item in value.split(sep) if item.strip()]
+            return [value.strip()]
+        return value
 
     @validator("notification_emails", pre=True)
     def _split_emails(cls, value):  # type: ignore[no-untyped-def]

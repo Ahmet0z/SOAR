@@ -32,7 +32,7 @@ python -m app.rq_worker
 | --- | --- |
 | `SOAR_SECRET_KEY` | JWT imzalama anahtarı |
 | `SOAR_DATABASE_URL` | SQLModel tarafından kullanılacak veritabanı bağlantısı |
-| `SOAR_CORS_ORIGINS` | Frontend domain listesi (virgülle ayrılmış) |
+| `SOAR_CORS_ORIGINS` | Frontend domain listesi (virgül veya boşlukla ayrılmış; varsayılan olarak localhost/127.0.0.1 üzerindeki 5173/4173 portları eklenir) |
 | `SOAR_DEFAULT_TENANT`, `SOAR_DEFAULT_TENANT_NAME` | İlk organizasyon bilgileri |
 | `SOAR_DEFAULT_ADMIN_USERNAME`, `SOAR_DEFAULT_ADMIN_PASSWORD` | Başlangıç yönetici kullanıcı bilgileri |
 | `SOAR_INVITE_EXPIRY_HOURS` | Organizasyon davetlerinin geçerli olacağı süre |
@@ -75,7 +75,7 @@ npm install
 npm run dev
 ```
 
-Arayüz `http://localhost:5173` adresinde çalışır ve varsayılan olarak `http://localhost:8000/api` taban adresine bağlanır. Farklı ortamlar için `.env` içine `VITE_API_BASE_URL` ekleyebilirsiniz.
+Arayüz `http://localhost:5173` adresinde çalışır ve varsayılan olarak kendi origin'ine (`window.location.origin`) eklenmiş `/api` yolu üzerinden backend'e bağlanır; bu sayede HTTPS/HTTP karışık içerik hataları önlenir. Farklı ortamlar için `.env` içine `VITE_API_BASE_URL` ekleyebilirsiniz.
 
 ### Arayüz Özellikleri
 
