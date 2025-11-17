@@ -1,0 +1,40 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: ./backend
+    command: bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      SOAR_DATABASE_URL: sqlite:///./soar.db
+      SOAR_REDIS_URL: redis://redis:6379/0
+      SOAR_AUTOMATION_QUEUE: automation-runs
+    volumes:
+      - ./backend:/app
+    ports:
+      - '8000:8000'
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+    command: bash -c "alembic upgrade head && python -m app.rq_worker"
+    environment:
+      SOAR_DATABASE_URL: sqlite:///./soar.db
+      SOAR_REDIS_URL: redis://redis:6379/0
+      SOAR_AUTOMATION_QUEUE: automation-runs
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
